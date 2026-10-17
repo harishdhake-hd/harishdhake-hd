@@ -1,0 +1,63 @@
+name: Validate Profile
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'README.md'
+      - 'assets/**'
+      - '.github/workflows/validate-profile.yml'
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'assets/**'
+      - '.github/workflows/validate-profile.yml'
+
+# This workflow validates profile files only. It does not generate statistics,
+# commit README changes, or create failure-notification issues.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate README and SVG assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout profile
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate README and SVG assets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          readme = Path("README.md").read_text(encoding="utf-8")
+          if not readme.strip():
+              raise SystemExit("README.md is empty")
+          if 'src="./assets/security-banner.svg"' not in readme:
+              raise SystemExit("README.md must reference the security banner")
+
+          svg_ns = "{http://www.w3.org/2000/svg}"
+          assets = sorted(Path("assets").glob("*.svg"))
+          if not assets:
+              raise SystemExit("No SVG assets found in assets/")
+          for path in assets:
+              root = ET.parse(path).getroot()
+              if root.tag != f"{svg_ns}svg":
+                  raise SystemExit(f"{path} is not a valid SVG document")
+              if not root.findtext(f"{svg_ns}title"):
+                  raise SystemExit(f"{path} needs an accessible title")
+          print(f"README and {len(assets)} SVG assets validated successfully.")
+          PY
+
+      - name: Report failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error::Profile validation failed. Review the failed step above."
+          echo "Profile validation failed. Review the failed step in this run." >> "$GITHUB_STEP_SUMMARY"
